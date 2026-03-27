@@ -1,0 +1,77 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: ZOL报价工具-macOS
+            ext: ""
+          - os: windows-latest
+            artifact: ZOL报价工具-Windows
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyqt5 xlsxwriter pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+            --name "ZOL报价工具" \
+            --add-data "zol_scraper:zol_scraper" \
+            --hidden-import "zol_scraper" \
+            --hidden-import "zol_scraper.constants" \
+            --hidden-import "zol_scraper.ui_main" \
+            --hidden-import "zol_scraper.ui_widgets" \
+            --hidden-import "zol_scraper.worker" \
+            --hidden-import "zol_scraper.service" \
+            --hidden-import "zol_scraper.scraper" \
+            --hidden-import "zol_scraper.matcher" \
+            --hidden-import "zol_scraper.downloader" \
+            --hidden-import "zol_scraper.exporter" \
+            --hidden-import "zol_scraper.xcx_scraper" \
+            --hidden-import "zol_scraper.types" \
+            zol_gui.py
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/ZOL报价工具${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
