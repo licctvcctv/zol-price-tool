@@ -15,10 +15,10 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact: ZOL报价工具-macOS
+            artifact: 数码回收报价工具-macOS
             ext: ""
           - os: windows-latest
-            artifact: ZOL报价工具-Windows
+            artifact: 数码回收报价工具-Windows
             ext: ".exe"
     runs-on: ${{ matrix.os }}
 
@@ -38,7 +38,7 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --onefile --windowed \
-            --name "ZOL报价工具" \
+            --name "数码回收报价工具" \
             --add-data "zol_scraper:zol_scraper" \
             --hidden-import "zol_scraper" \
             --hidden-import "zol_scraper.constants" \
@@ -46,9 +46,7 @@ jobs:
             --hidden-import "zol_scraper.ui_widgets" \
             --hidden-import "zol_scraper.worker" \
             --hidden-import "zol_scraper.service" \
-            --hidden-import "zol_scraper.scraper" \
-            --hidden-import "zol_scraper.matcher" \
-            --hidden-import "zol_scraper.downloader" \
+            --hidden-import "zol_scraper.admin_scraper" \
             --hidden-import "zol_scraper.exporter" \
             --hidden-import "zol_scraper.xcx_scraper" \
             --hidden-import "zol_scraper.types" \
@@ -59,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/ZOL报价工具${{ matrix.ext }}
+          path: dist/数码回收报价工具${{ matrix.ext }}
 
   release:
     needs: build

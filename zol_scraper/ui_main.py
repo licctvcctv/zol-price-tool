@@ -1,13 +1,12 @@
-"""ZOL 手机报价爬虫 - 主窗口"""
+"""数码回收报价工具 - 主窗口"""
 from __future__ import annotations
 
 import os
 import subprocess
-import webbrowser
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QSplitter,
+    QMainWindow, QWidget, QVBoxLayout,
     QTableWidgetItem, QFileDialog, QMessageBox,
 )
 from PyQt5.QtCore import Qt
@@ -24,27 +23,22 @@ from .ui_widgets import (
 )
 
 _MATCHED_BG = QColor("#e8f5e9")
-_XCX_MATCHED_BG = QColor("#e0f7fa")
 _UNMATCHED_BG = QColor("#ffffff")
 
 
 def _row_to_vals(r_idx: int, row: dict) -> list[str]:
-    price = row.get("ZOL报价", "")
-    price_str = f"¥{price}" if price else "-"
     return [
         str(r_idx + 1),
         str(row.get("品牌", "")),
         str(row.get("机型", "")),
         str(row.get("内存", "")),
-        price_str,
-        row.get("匹配状态", ""),
         row.get("小程序匹配", ""),
-        row.get("ZOL链接", "") or "",
+        str(row.get("类型", "")),
     ]
 
 
 def _row_bg(row: dict) -> QColor:
-    if row.get("匹配状态") == "已匹配":
+    if row.get("小程序匹配") == "已匹配":
         return _MATCHED_BG
     return _UNMATCHED_BG
 
@@ -75,24 +69,22 @@ class MainWindow(QMainWindow):
         lay.addWidget(build_table(self), 1)
         lay.addLayout(build_log_area(self))
 
-        self.statusBar().showMessage("就绪 — 选择 Excel 文件后点击 [开始爬取]")
+        self.statusBar().showMessage("就绪 — 选择 Excel 文件后点击 [开始查询]")
 
     def _apply_config(self):
         cfg = self._config
         self.txt_excel.setText(str(cfg.get("excel_path", "")))
-        self.spin_pages.setValue(int(cfg.get("total_pages", 91)))
-        self.spin_threads_pages.setValue(int(cfg.get("threads_pages", 10)))
-        self.spin_threads_images.setValue(int(cfg.get("threads_images", 20)))
-        self.chk_download.setChecked(bool(cfg.get("download_images", True)))
+        self.txt_username.setText(str(cfg.get("username", "不貮二手数码")))
+        self.txt_password.setText(str(cfg.get("password", "不貮二手数码")))
+        self.spin_threads.setValue(int(cfg.get("threads", 5)))
 
     def _save_config(self):
         save_config({
             "excel_path": self.txt_excel.text().strip(),
             "output_dir": str(self._output_dir()),
-            "total_pages": self.spin_pages.value(),
-            "threads_pages": self.spin_threads_pages.value(),
-            "threads_images": self.spin_threads_images.value(),
-            "download_images": self.chk_download.isChecked(),
+            "username": self.txt_username.text().strip(),
+            "password": self.txt_password.text().strip(),
+            "threads": self.spin_threads.value(),
         })
 
     def _output_dir(self) -> Path:
@@ -108,7 +100,7 @@ class MainWindow(QMainWindow):
         if path:
             self.txt_excel.setText(path)
 
-    # ── 开始爬取 ─────────────────────────────────────────
+    # ── 开始查询 ─────────────────────────────────────────
     def _on_start_scrape(self):
         excel = self.txt_excel.text().strip()
         if not excel or not os.path.exists(excel):
@@ -122,18 +114,17 @@ class MainWindow(QMainWindow):
         out.mkdir(parents=True, exist_ok=True)
 
         self.btn_scrape.setEnabled(False)
-        self.btn_scrape.setText("爬取中...")
+        self.btn_scrape.setText("查询中...")
         self.progress.setVisible(True)
         self.log_text.clear()
-        self._add_log("[*] 开始爬取，请稍等...")
+        self._add_log("[*] 开始查询，请稍等...")
 
         self._worker = ScrapeWorker(
             excel_path=excel,
             output_dir=str(out),
-            total_pages=self.spin_pages.value(),
-            threads_pages=self.spin_threads_pages.value(),
-            threads_images=self.spin_threads_images.value(),
-            download_imgs=self.chk_download.isChecked(),
+            username=self.txt_username.text().strip(),
+            password=self.txt_password.text().strip(),
+            threads=self.spin_threads.value(),
             scrape_xcx=self.chk_xcx.isChecked(),
         )
         self._worker.progress.connect(self._add_log)
@@ -166,24 +157,20 @@ class MainWindow(QMainWindow):
     def _on_scrape_done(self, result):
         self.progress.setVisible(False)
         self.btn_scrape.setEnabled(True)
-        self.btn_scrape.setText("  开始爬取  ")
+        self.btn_scrape.setText("  开始查询  ")
 
-        sr = result.scrape
-        mr = result.match
-        self._all_rows = mr.rows
-        pct = mr.matched_count / mr.total_excel * 100 if mr.total_excel else 0
+        self._all_rows = result.rows
 
         # 更新统计
-        self.lbl_zol_count.setText(f"ZOL产品: {len(sr.products)}")
-        self.lbl_matched.setText(f"ZOL匹配: {mr.matched_count}/{mr.total_excel}")
-        self.lbl_rate.setText(f"匹配率: {pct:.1f}%")
-        self.lbl_xcx.setText(f"小程序匹配: {result.xcx_matched}")
-        self.lbl_images.setText(f"图片: {result.images_downloaded}")
+        self.lbl_admin_count.setText(f"后台报价: {result.admin_prices_count}")
+        self.lbl_excel_count.setText(f"Excel行数: {result.total_excel}")
+        self.lbl_xcx.setText(f"小程序匹配: {result.xcx_matched}/{result.total_excel}")
 
-        self._add_log(f"[+] 完成! ZOL匹配 {mr.matched_count}/{mr.total_excel} ({pct:.1f}%), 小程序匹配 {result.xcx_matched}")
+        pct = result.xcx_matched / result.total_excel * 100 if result.total_excel else 0
+        self._add_log(f"[+] 完成! 小程序匹配 {result.xcx_matched}/{result.total_excel} ({pct:.1f}%)")
         self._add_log(f"[+] 结果: {result.output.excel_path}")
         self.statusBar().showMessage(
-            f"完成: ZOL {len(sr.products)} 产品, ZOL匹配 {mr.matched_count}/{mr.total_excel}, 小程序 {result.xcx_matched}"
+            f"完成: 后台 {result.admin_prices_count} 条报价, 小程序匹配 {result.xcx_matched}/{result.total_excel}"
         )
 
         self._on_search()
@@ -191,9 +178,9 @@ class MainWindow(QMainWindow):
     def _on_scrape_error(self, msg):
         self.progress.setVisible(False)
         self.btn_scrape.setEnabled(True)
-        self.btn_scrape.setText("  开始爬取  ")
+        self.btn_scrape.setText("  开始查询  ")
         self._add_log(f"[!] 错误: {msg}")
-        QMessageBox.warning(self, "爬取失败", msg)
+        QMessageBox.warning(self, "查询失败", msg)
 
     # ── 搜索/筛选 ────────────────────────────────────────
     def _on_search(self):
@@ -202,7 +189,7 @@ class MainWindow(QMainWindow):
 
         filtered = []
         for row in self._all_rows:
-            if matched_only and row.get("匹配状态") != "已匹配":
+            if matched_only and row.get("小程序匹配") != "已匹配":
                 continue
             if keyword:
                 haystack = f"{row.get('品牌', '')} {row.get('机型', '')} {row.get('内存', '')}".lower()
@@ -231,24 +218,18 @@ class MainWindow(QMainWindow):
         self.table.setSortingEnabled(True)
         self.table.setUpdatesEnabled(True)
 
-    def _on_cell_dblclick(self, row, col):
-        if row < len(self._filtered):
-            link = self._filtered[row].get("ZOL链接", "")
-            if link:
-                webbrowser.open(link)
-
     # ── 缓存/目录 ────────────────────────────────────────
     def _on_clear_cache(self):
         out = self._output_dir()
         cleared = False
-        for name in ["zol_products_cache.json", "xcx_prices_cache.json"]:
+        for name in ["admin_prices_cache.json", "xcx_prices_cache.json"]:
             cache = out / name
             if cache.exists():
                 cache.unlink()
                 cleared = True
                 self._add_log(f"[+] 已清除: {name}")
         if cleared:
-            self.statusBar().showMessage("缓存已清除，下次将重新爬取")
+            self.statusBar().showMessage("缓存已清除，下次将重新抓取")
         else:
             self._add_log("[*] 没有缓存文件")
 

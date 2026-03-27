@@ -31,10 +31,9 @@ CONFIG_PATH = APP_ROOT / ".zol_scraper_gui.json"
 DEFAULTS: dict[str, Any] = {
     "excel_path": "",
     "output_dir": str(APP_ROOT / "output"),
-    "threads_pages": 10,
-    "threads_images": 20,
-    "total_pages": TOTAL_PAGES,
-    "download_images": True,
+    "username": "不貮二手数码",
+    "password": "不貮二手数码",
+    "threads": 5,
 }
 
 

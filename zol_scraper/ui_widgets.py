@@ -1,4 +1,4 @@
-"""UI 组件构建 — 参照 sohu-news-scraper 风格"""
+"""UI 组件构建"""
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
@@ -31,7 +31,7 @@ def build_toolbar(win) -> QHBoxLayout:
     row.addSpacing(10)
 
     # 开始按钮
-    win.btn_scrape = QPushButton("  开始爬取  ")
+    win.btn_scrape = QPushButton("  开始查询  ")
     win.btn_scrape.setFixedHeight(42)
     win.btn_scrape.setStyleSheet(
         "QPushButton{background:#174d43;color:#fff;font-size:15px;"
@@ -54,37 +54,42 @@ def build_toolbar(win) -> QHBoxLayout:
 
 
 def build_settings_bar(win) -> QHBoxLayout:
-    """设置栏: 线程数 + 页数 + 下载图片"""
+    """设置栏: 后台账号密码 + 线程数 + 选项"""
     row = QHBoxLayout()
 
-    grp = QGroupBox("爬取设置")
+    # 后台账号
+    grp_account = QGroupBox("后台账号")
+    al = QHBoxLayout(grp_account)
+    al.setContentsMargins(10, 4, 10, 4)
+
+    al.addWidget(QLabel("账号"))
+    win.txt_username = QLineEdit()
+    win.txt_username.setText("不貮二手数码")
+    win.txt_username.setMinimumWidth(120)
+    al.addWidget(win.txt_username)
+
+    al.addSpacing(6)
+    al.addWidget(QLabel("密码"))
+    win.txt_password = QLineEdit()
+    win.txt_password.setText("不貮二手数码")
+    win.txt_password.setEchoMode(QLineEdit.Password)
+    win.txt_password.setMinimumWidth(120)
+    al.addWidget(win.txt_password)
+
+    row.addWidget(grp_account)
+
+    row.addSpacing(6)
+
+    # 爬取设置
+    grp = QGroupBox("设置")
     gl = QHBoxLayout(grp)
     gl.setContentsMargins(10, 4, 10, 4)
 
-    gl.addWidget(QLabel("爬取页数"))
-    win.spin_pages = QSpinBox()
-    win.spin_pages.setRange(1, 200)
-    win.spin_pages.setValue(91)
-    gl.addWidget(win.spin_pages)
-
-    gl.addSpacing(10)
-    gl.addWidget(QLabel("爬取线程"))
-    win.spin_threads_pages = QSpinBox()
-    win.spin_threads_pages.setRange(1, 50)
-    win.spin_threads_pages.setValue(10)
-    gl.addWidget(win.spin_threads_pages)
-
-    gl.addSpacing(10)
-    gl.addWidget(QLabel("下载线程"))
-    win.spin_threads_images = QSpinBox()
-    win.spin_threads_images.setRange(1, 50)
-    win.spin_threads_images.setValue(20)
-    gl.addWidget(win.spin_threads_images)
-
-    gl.addSpacing(10)
-    win.chk_download = QCheckBox("下载产品主图")
-    win.chk_download.setChecked(True)
-    gl.addWidget(win.chk_download)
+    gl.addWidget(QLabel("线程数"))
+    win.spin_threads = QSpinBox()
+    win.spin_threads.setRange(1, 20)
+    win.spin_threads.setValue(5)
+    gl.addWidget(win.spin_threads)
 
     gl.addSpacing(10)
     win.chk_xcx = QCheckBox("小程序回收价")
@@ -112,25 +117,17 @@ def build_stats_bar(win) -> QHBoxLayout:
     row = QHBoxLayout()
     s = "font-size:13px;padding:4px 12px;border-radius:3px;"
 
-    win.lbl_zol_count = QLabel("ZOL产品: --")
-    win.lbl_zol_count.setStyleSheet(s + "background:#e3f2fd;color:#1565c0;")
-    row.addWidget(win.lbl_zol_count)
+    win.lbl_admin_count = QLabel("后台报价: --")
+    win.lbl_admin_count.setStyleSheet(s + "background:#e3f2fd;color:#1565c0;")
+    row.addWidget(win.lbl_admin_count)
 
-    win.lbl_matched = QLabel("匹配: --")
-    win.lbl_matched.setStyleSheet(s + "background:#e8f5e9;color:#2e7d32;font-weight:bold;")
-    row.addWidget(win.lbl_matched)
-
-    win.lbl_rate = QLabel("匹配率: --")
-    win.lbl_rate.setStyleSheet(s + "background:#fff3e0;color:#e65100;")
-    row.addWidget(win.lbl_rate)
+    win.lbl_excel_count = QLabel("Excel行数: --")
+    win.lbl_excel_count.setStyleSheet(s + "background:#e8f5e9;color:#2e7d32;")
+    row.addWidget(win.lbl_excel_count)
 
     win.lbl_xcx = QLabel("小程序匹配: --")
-    win.lbl_xcx.setStyleSheet(s + "background:#e0f7fa;color:#00695c;")
+    win.lbl_xcx.setStyleSheet(s + "background:#e0f7fa;color:#00695c;font-weight:bold;")
     row.addWidget(win.lbl_xcx)
-
-    win.lbl_images = QLabel("图片: --")
-    win.lbl_images.setStyleSheet(s + "background:#fce4ec;color:#c62828;")
-    row.addWidget(win.lbl_images)
 
     win.lbl_showing = QLabel("显示: --")
     win.lbl_showing.setStyleSheet(s + "background:#f3e5f5;color:#6a1b9a;")
@@ -166,9 +163,9 @@ def build_search_bar(win) -> QHBoxLayout:
 def build_table(win) -> QTableWidget:
     """结果表格"""
     win.table = QTableWidget()
-    win.table.setColumnCount(8)
+    win.table.setColumnCount(6)
     win.table.setHorizontalHeaderLabels(
-        ["序号", "品牌", "机型", "内存", "ZOL报价", "ZOL匹配", "小程序匹配", "ZOL链接"]
+        ["序号", "品牌", "机型", "内存", "小程序匹配", "类型"]
     )
     h = win.table.horizontalHeader()
     h.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -176,17 +173,13 @@ def build_table(win) -> QTableWidget:
     h.setSectionResizeMode(1, QHeaderView.ResizeToContents)
     h.setSectionResizeMode(2, QHeaderView.Stretch)
     h.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-    h.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-    h.setSectionResizeMode(5, QHeaderView.Fixed)
-    win.table.setColumnWidth(5, 80)
-    h.setSectionResizeMode(6, QHeaderView.Fixed)
-    win.table.setColumnWidth(6, 90)
-    h.setSectionResizeMode(7, QHeaderView.Stretch)
+    h.setSectionResizeMode(4, QHeaderView.Fixed)
+    win.table.setColumnWidth(4, 90)
+    h.setSectionResizeMode(5, QHeaderView.ResizeToContents)
 
     win.table.setSelectionBehavior(QTableWidget.SelectRows)
     win.table.setEditTriggers(QTableWidget.NoEditTriggers)
     win.table.setAlternatingRowColors(True)
-    win.table.cellDoubleClicked.connect(win._on_cell_dblclick)
     return win.table
 
 
