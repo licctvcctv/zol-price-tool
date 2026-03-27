@@ -1,0 +1,8 @@
+.DS_Store
+*.zip
+zol_images/
+output/
+__pycache__/
+*.pyc
+.zol_scraper_gui.json
+node_modules/
