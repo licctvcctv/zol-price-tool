@@ -26,18 +26,25 @@ _MATCHED_BG = QColor("#e8f5e9")
 _UNMATCHED_BG = QColor("#ffffff")
 
 
+_ADMIN_MATCHED_BG = QColor("#e3f2fd")
+
+
 def _row_to_vals(r_idx: int, row: dict) -> list[str]:
     return [
         str(r_idx + 1),
+        str(row.get("类型", "")),
         str(row.get("品牌", "")),
         str(row.get("机型", "")),
         str(row.get("内存", "")),
+        row.get("后台匹配", ""),
         row.get("小程序匹配", ""),
-        str(row.get("类型", "")),
+        str(row.get("后台分类", "")),
     ]
 
 
 def _row_bg(row: dict) -> QColor:
+    if row.get("后台匹配") == "已匹配":
+        return _ADMIN_MATCHED_BG
     if row.get("小程序匹配") == "已匹配":
         return _MATCHED_BG
     return _UNMATCHED_BG
@@ -164,13 +171,15 @@ class MainWindow(QMainWindow):
         # 更新统计
         self.lbl_admin_count.setText(f"后台报价: {result.admin_prices_count}")
         self.lbl_excel_count.setText(f"Excel行数: {result.total_excel}")
+        admin_pct = result.admin_matched / result.total_excel * 100 if result.total_excel else 0
+        self.lbl_admin_matched.setText(f"后台匹配: {result.admin_matched}/{result.total_excel} ({admin_pct:.0f}%)")
         self.lbl_xcx.setText(f"小程序匹配: {result.xcx_matched}/{result.total_excel}")
 
-        pct = result.xcx_matched / result.total_excel * 100 if result.total_excel else 0
-        self._add_log(f"[+] 完成! 小程序匹配 {result.xcx_matched}/{result.total_excel} ({pct:.1f}%)")
+        self._add_log(f"[+] 完成! 后台匹配 {result.admin_matched}/{result.total_excel} ({admin_pct:.1f}%)")
+        self._add_log(f"[+] 小程序匹配 {result.xcx_matched}/{result.total_excel}")
         self._add_log(f"[+] 结果: {result.output.excel_path}")
         self.statusBar().showMessage(
-            f"完成: 后台 {result.admin_prices_count} 条报价, 小程序匹配 {result.xcx_matched}/{result.total_excel}"
+            f"完成: 后台匹配 {result.admin_matched}/{result.total_excel}, 小程序 {result.xcx_matched}"
         )
 
         self._on_search()

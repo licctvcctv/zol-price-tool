@@ -178,9 +178,28 @@ def scrape_xcx_prices(
     return all_products
 
 
+# ── 品牌别名映射（Excel品牌 → 小程序category可能的值）──────
+XCX_BRAND_ALIASES: dict[str, list[str]] = {
+    "华为OK板": ["华为"],
+    "华为旗舰": ["华为旗舰", "华为"],
+    "红米、黑鲨": ["红米、黑鲨", "小米"],
+    "荣耀其他": ["荣耀其他", "荣耀"],
+    "锤子坚果": ["锤子坚果", "锤子"],
+    "苹果平板": ["苹果平板"],
+    "华为平板": ["华为平板", "OPPO/vivo平板", "OPPO/VIVO平板"],
+    "三星平板": ["三星平板"],
+    "统货功能机": ["热门老年机"],
+    "MP3、MP4": [],
+    "海康录像机": [],
+    "华为随身4Gwifi": [],
+}
+
+
 # ── 构建价格索引 ──────────────────────────────────────────
-def build_price_index(price_data: List[Dict]) -> Dict[str, Dict]:
+def build_price_index(price_data: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
+    """返回 (带top_cat的索引, 不带top_cat的索引) 用于回退搜索"""
     index: Dict[str, Dict] = {}
+    brand_model_index: Dict[str, Dict] = {}  # 不含 top_cat 的回退索引
     for p in price_data:
         brand = _normalize(p.get("category", ""))
         model = _normalize(p.get("model", ""))
@@ -200,21 +219,45 @@ def build_price_index(price_data: List[Dict]) -> Dict[str, Dict]:
             k2 = f"{top_cat}|{brand}|{model}|"
             if k2 not in index:
                 index[k2] = prices
-    return index
+
+        # 回退索引（不含 top_cat）
+        bm_key = f"{brand}|{model}|{mem}"
+        if bm_key not in brand_model_index:
+            brand_model_index[bm_key] = prices
+        if not mem:
+            bm_key2 = f"{brand}|{model}|"
+            if bm_key2 not in brand_model_index:
+                brand_model_index[bm_key2] = prices
+
+    return index, brand_model_index
+
+
+def _get_brand_variants(brand: str, top_cat: str) -> list[str]:
+    """获取品牌在小程序中可能的所有 category 名"""
+    variants = []
+    # 别名映射
+    if brand in XCX_BRAND_ALIASES:
+        aliases = XCX_BRAND_ALIASES[brand]
+        variants.extend(_normalize(a) for a in aliases)
+    # 苹果在新机靓机下拆分有保/无保
+    if _normalize(brand) == "苹果" and top_cat == "新机靓机报价":
+        variants = ["苹果有保", "苹果无保"]
+    elif not variants:
+        variants = [_normalize(brand)]
+    return variants
 
 
 def _find_prices(
     price_index: Dict[str, Dict],
+    brand_model_index: Dict[str, Dict],
     client_type: str, client_brand: str, client_model: str, mem: str,
 ) -> Optional[Dict]:
     top_cat = TYPE_MAP.get(client_type, client_type)
-    brand = _normalize(client_brand)
+    brand = client_brand.strip()
     model = _normalize(client_model)
     mem_norm = _norm_mem(mem)
 
-    brand_variants = [brand]
-    if brand == "苹果" and top_cat == "新机靓机报价":
-        brand_variants = ["苹果有保", "苹果无保"]
+    brand_variants = _get_brand_variants(brand, top_cat)
 
     model_variants = [
         model,
@@ -225,28 +268,52 @@ def _find_prices(
         model.replace("6sp", "6splus"),
         model.replace("iphone苹果x", "iphonex"),
     ]
+    # 去掉 "代" 后缀：iphone7代 -> iphone7
+    import re
+    cleaned = re.sub(r"(\d+)代", r"\1", model)
+    if cleaned != model:
+        model_variants.append(cleaned)
 
-    # 精确匹配
+    # 1. 精确匹配（带 top_cat）
     for mv in model_variants:
         for bv in brand_variants:
-            bv_norm = _normalize(bv)
-            for key in [f"{top_cat}|{bv_norm}|{mv}|{mem_norm}", f"{top_cat}|{bv_norm}|{mv}|"]:
+            for key in [f"{top_cat}|{bv}|{mv}|{mem_norm}", f"{top_cat}|{bv}|{mv}|"]:
                 if key in price_index:
                     return price_index[key]
 
-    # 模糊匹配
+    # 2. 模糊匹配（带 top_cat，包含关系）
     for mv in model_variants:
         for bv in brand_variants:
-            bv_norm = _normalize(bv)
             for key, prices in price_index.items():
                 parts = key.split("|")
                 if len(parts) < 4:
                     continue
-                if parts[0] == top_cat and parts[1] == bv_norm:
+                if parts[0] == top_cat and parts[1] == bv:
                     im, imem = parts[2], parts[3]
-                    if (im in mv or mv in im) and len(im) > 3:
+                    if (im in mv or mv in im) and len(im) > 1 and len(mv) > 1:
                         if not mem_norm or imem == mem_norm or not imem:
                             return prices
+
+    # 3. 回退：跨 top_category 搜索（只匹配品牌+型号）
+    for mv in model_variants:
+        for bv in brand_variants:
+            for key in [f"{bv}|{mv}|{mem_norm}", f"{bv}|{mv}|"]:
+                if key in brand_model_index:
+                    return brand_model_index[key]
+
+    # 4. 回退：跨 top_category 模糊匹配
+    for mv in model_variants:
+        for bv in brand_variants:
+            for key, prices in brand_model_index.items():
+                parts = key.split("|")
+                if len(parts) < 3:
+                    continue
+                if parts[0] == bv:
+                    im, imem = parts[1], parts[2]
+                    if (im in mv or mv in im) and len(im) > 1 and len(mv) > 1:
+                        if not mem_norm or imem == mem_norm or not imem:
+                            return prices
+
     return None
 
 
@@ -258,8 +325,8 @@ def merge_xcx_prices(
     on_row_update: Optional[Callable] = None,
 ) -> tuple[List[Dict], int]:
     """将小程序回收价合并到匹配结果行中，返回 (更新后的rows, 匹配数)"""
-    price_index = build_price_index(price_data)
-    progress(f"  小程序价格索引: {len(price_index)} 条")
+    price_index, brand_model_index = build_price_index(price_data)
+    progress(f"  小程序价格索引: {len(price_index)} 条 (回退索引: {len(brand_model_index)} 条)")
 
     matched = 0
     total = len(rows)
@@ -278,7 +345,17 @@ def merge_xcx_prices(
             row.setdefault(f"SKU{j}回收价", "")
         row.setdefault("小程序匹配", "未匹配")
 
-        prices = _find_prices(price_index, client_type, client_brand, client_model, client_mem)
+        # 内存可能是逗号分隔的多值（如 "1TB,512G,256G"），逐个尝试
+        mem_variants = [m.strip() for m in client_mem.split(",") if m.strip()] if "," in client_mem else [client_mem]
+        # 加上空内存做回退
+        if "" not in mem_variants:
+            mem_variants.append("")
+
+        prices = None
+        for mem_v in mem_variants:
+            prices = _find_prices(price_index, brand_model_index, client_type, client_brand, client_model, mem_v)
+            if prices:
+                break
         if prices:
             matched += 1
             row["小程序匹配"] = "已匹配"

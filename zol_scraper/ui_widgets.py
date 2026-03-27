@@ -125,6 +125,10 @@ def build_stats_bar(win) -> QHBoxLayout:
     win.lbl_excel_count.setStyleSheet(s + "background:#e8f5e9;color:#2e7d32;")
     row.addWidget(win.lbl_excel_count)
 
+    win.lbl_admin_matched = QLabel("后台匹配: --")
+    win.lbl_admin_matched.setStyleSheet(s + "background:#fff3e0;color:#e65100;font-weight:bold;")
+    row.addWidget(win.lbl_admin_matched)
+
     win.lbl_xcx = QLabel("小程序匹配: --")
     win.lbl_xcx.setStyleSheet(s + "background:#e0f7fa;color:#00695c;font-weight:bold;")
     row.addWidget(win.lbl_xcx)
@@ -163,19 +167,22 @@ def build_search_bar(win) -> QHBoxLayout:
 def build_table(win) -> QTableWidget:
     """结果表格"""
     win.table = QTableWidget()
-    win.table.setColumnCount(6)
+    win.table.setColumnCount(8)
     win.table.setHorizontalHeaderLabels(
-        ["序号", "品牌", "机型", "内存", "小程序匹配", "类型"]
+        ["序号", "类型", "品牌", "机型", "内存", "后台匹配", "小程序匹配", "后台对应"]
     )
     h = win.table.horizontalHeader()
     h.setSectionResizeMode(0, QHeaderView.Fixed)
     win.table.setColumnWidth(0, 50)
     h.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-    h.setSectionResizeMode(2, QHeaderView.Stretch)
-    h.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-    h.setSectionResizeMode(4, QHeaderView.Fixed)
-    win.table.setColumnWidth(4, 90)
-    h.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+    h.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+    h.setSectionResizeMode(3, QHeaderView.Stretch)
+    h.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+    h.setSectionResizeMode(5, QHeaderView.Fixed)
+    win.table.setColumnWidth(5, 80)
+    h.setSectionResizeMode(6, QHeaderView.Fixed)
+    win.table.setColumnWidth(6, 90)
+    h.setSectionResizeMode(7, QHeaderView.Stretch)
 
     win.table.setSelectionBehavior(QTableWidget.SelectRows)
     win.table.setEditTriggers(QTableWidget.NoEditTriggers)
