@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import json
-import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 ADMIN_BASE = "https://xcx1540.ycdongxu.com"
@@ -22,6 +21,9 @@ def _create_session() -> requests.Session:
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     })
+    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
     return s
 
 
@@ -61,12 +63,10 @@ def _parse_price_table(html: str) -> Tuple[List[str], List[Dict[str, str]]]:
     if not table:
         return [], []
 
-    # 解析表头
     headers = []
     for th in table.select("thead tr th"):
         headers.append(th.get_text(strip=True))
 
-    # 解析数据行
     rows = []
     for tr in table.select("tbody tr"):
         inputs = tr.select("input.input-sm")
@@ -77,22 +77,25 @@ def _parse_price_table(html: str) -> Tuple[List[str], List[Dict[str, str]]]:
             continue
 
         row: Dict[str, str] = {}
-        # 第一个 input 是分类名（机型名）
         row["分类"] = values[0]
-
-        # 后面的 input 对应表头列（从第2列开始）
         for i, val in enumerate(values[1:]):
             col_name = headers[i + 1] if (i + 1) < len(headers) else f"列{i + 1}"
             row[col_name] = val
-
         rows.append(row)
 
     return headers, rows
 
 
+def _fetch_page(session: requests.Session, url: str) -> str:
+    """获取页面 HTML"""
+    r = session.get(url, timeout=15)
+    r.encoding = "utf-8"
+    return r.text
+
+
 def scrape_admin_prices(
     session: requests.Session,
-    threads: int = 5,
+    threads: int = 10,
     progress: Callable = print,
     cache_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
@@ -107,29 +110,32 @@ def scrape_admin_prices(
         except Exception:
             pass
 
-    # 1. 获取顶级分类（废旧手机回收报价、数码相机回收报价...）
+    # 1. 获取顶级分类
     progress("  获取分类列表...")
-    r = session.get(CATEGORY_URL, timeout=15)
-    r.encoding = "utf-8"
-    top_categories = _parse_nav_links(r.text, "/index.php/Admin/San/categoryList222/ptab/")
+    html = _fetch_page(session, CATEGORY_URL)
+    top_categories = _parse_nav_links(html, "/index.php/Admin/San/categoryList222/ptab/")
     progress(f"  顶级分类: {len(top_categories)} 个")
 
-    # 2. 对每个顶级分类，获取品牌列表
-    all_brand_tasks: List[Tuple[str, str, str]] = []  # (top_cat_name, brand_name, brand_url)
+    # 2. 并发获取每个顶级分类下的品牌列表
+    all_brand_tasks: List[Tuple[str, str, str]] = []
 
-    for cat_name, cat_url in top_categories:
+    def fetch_brands(cat_name: str, cat_url: str) -> List[Tuple[str, str, str]]:
         try:
-            r = session.get(cat_url, timeout=15)
-            r.encoding = "utf-8"
-            brands = _parse_nav_links(r.text, "/index.php/Admin/San/categoryList222/brand/")
-            for brand_name, brand_url in brands:
-                all_brand_tasks.append((cat_name, brand_name, brand_url))
-            progress(f"  [{cat_name}] {len(brands)} 个品牌")
+            cat_html = _fetch_page(session, cat_url)
+            brands = _parse_nav_links(cat_html, "/index.php/Admin/San/categoryList222/brand/")
+            return [(cat_name, bn, bu) for bn, bu in brands]
         except Exception:
-            progress(f"  [{cat_name}] 获取品牌失败")
-        time.sleep(0.1)
+            return []
 
-    progress(f"  总计 {len(all_brand_tasks)} 个品牌页面待抓取...")
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        futures = {pool.submit(fetch_brands, cn, cu): cn for cn, cu in top_categories}
+        for future in as_completed(futures):
+            cat = futures[future]
+            results = future.result()
+            all_brand_tasks.extend(results)
+            progress(f"  [{cat}] {len(results)} 个品牌")
+
+    progress(f"  总计 {len(all_brand_tasks)} 个品牌页面，{threads} 线程并发抓取...")
 
     # 3. 并发抓取每个品牌的报价表
     all_prices: List[Dict[str, Any]] = []
@@ -137,16 +143,13 @@ def scrape_admin_prices(
     def fetch_brand(task: Tuple[str, str, str]) -> List[Dict[str, Any]]:
         top_cat, brand, url = task
         try:
-            resp = session.get(url, timeout=15)
-            resp.encoding = "utf-8"
-            headers, rows = _parse_price_table(resp.text)
-            results = []
+            brand_html = _fetch_page(session, url)
+            headers, rows = _parse_price_table(brand_html)
             for row in rows:
                 row["顶级分类"] = top_cat
                 row["品牌"] = brand
                 row["SKU列名"] = [h for h in headers if h not in ("分类", "备注")]
-                results.append(row)
-            return results
+            return rows
         except Exception:
             return []
 

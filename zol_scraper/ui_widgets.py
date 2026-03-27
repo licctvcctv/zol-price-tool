@@ -88,7 +88,7 @@ def build_settings_bar(win) -> QHBoxLayout:
     gl.addWidget(QLabel("线程数"))
     win.spin_threads = QSpinBox()
     win.spin_threads.setRange(1, 20)
-    win.spin_threads.setValue(5)
+    win.spin_threads.setValue(10)
     gl.addWidget(win.spin_threads)
 
     gl.addSpacing(10)

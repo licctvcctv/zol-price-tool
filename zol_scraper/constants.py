@@ -33,7 +33,7 @@ DEFAULTS: dict[str, Any] = {
     "output_dir": str(APP_ROOT / "output"),
     "username": "不貮二手数码",
     "password": "不貮二手数码",
-    "threads": 5,
+    "threads": 10,
 }
 
 
