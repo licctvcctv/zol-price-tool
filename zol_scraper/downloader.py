@@ -4,18 +4,31 @@ from __future__ import annotations
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .constants import HEADERS
 from .types import MatchedRow
 
+# 全局 Session — 复用连接池
+_session: Optional[requests.Session] = None
 
-def _create_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    return s
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update(HEADERS)
+        adapter = HTTPAdapter(
+            pool_connections=25, pool_maxsize=25,
+            max_retries=Retry(total=0),
+        )
+        _session.mount("https://", adapter)
+        _session.mount("http://", adapter)
+    return _session
 
 
 def _download_one(args: Tuple[str, str]) -> bool:
@@ -23,11 +36,11 @@ def _download_one(args: Tuple[str, str]) -> bool:
     if os.path.exists(save_path):
         return True
     try:
-        s = _create_session()
-        r = s.get(img_url, timeout=10)
+        r = _get_session().get(img_url, timeout=10, stream=True)
         if r.status_code == 200:
             with open(save_path, "wb") as f:
-                f.write(r.content)
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
             return True
     except Exception:
         pass

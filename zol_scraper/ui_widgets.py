@@ -86,6 +86,11 @@ def build_settings_bar(win) -> QHBoxLayout:
     win.chk_download.setChecked(True)
     gl.addWidget(win.chk_download)
 
+    gl.addSpacing(10)
+    win.chk_xcx = QCheckBox("小程序回收价")
+    win.chk_xcx.setChecked(True)
+    gl.addWidget(win.chk_xcx)
+
     row.addWidget(grp)
     row.addStretch()
 
@@ -118,6 +123,10 @@ def build_stats_bar(win) -> QHBoxLayout:
     win.lbl_rate = QLabel("匹配率: --")
     win.lbl_rate.setStyleSheet(s + "background:#fff3e0;color:#e65100;")
     row.addWidget(win.lbl_rate)
+
+    win.lbl_xcx = QLabel("小程序匹配: --")
+    win.lbl_xcx.setStyleSheet(s + "background:#e0f7fa;color:#00695c;")
+    row.addWidget(win.lbl_xcx)
 
     win.lbl_images = QLabel("图片: --")
     win.lbl_images.setStyleSheet(s + "background:#fce4ec;color:#c62828;")
@@ -157,9 +166,9 @@ def build_search_bar(win) -> QHBoxLayout:
 def build_table(win) -> QTableWidget:
     """结果表格"""
     win.table = QTableWidget()
-    win.table.setColumnCount(7)
+    win.table.setColumnCount(8)
     win.table.setHorizontalHeaderLabels(
-        ["序号", "品牌", "机型", "内存", "ZOL报价", "匹配状态", "ZOL链接"]
+        ["序号", "品牌", "机型", "内存", "ZOL报价", "ZOL匹配", "小程序匹配", "ZOL链接"]
     )
     h = win.table.horizontalHeader()
     h.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -170,7 +179,9 @@ def build_table(win) -> QTableWidget:
     h.setSectionResizeMode(4, QHeaderView.ResizeToContents)
     h.setSectionResizeMode(5, QHeaderView.Fixed)
     win.table.setColumnWidth(5, 80)
-    h.setSectionResizeMode(6, QHeaderView.Stretch)
+    h.setSectionResizeMode(6, QHeaderView.Fixed)
+    win.table.setColumnWidth(6, 90)
+    h.setSectionResizeMode(7, QHeaderView.Stretch)
 
     win.table.setSelectionBehavior(QTableWidget.SelectRows)
     win.table.setEditTriggers(QTableWidget.NoEditTriggers)

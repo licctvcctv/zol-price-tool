@@ -8,28 +8,41 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 
 from .constants import BASE_URL, HEADERS, LIST_URL_FIRST, LIST_URL_TEMPLATE
 from .types import Product, ScrapeResult
 
+# 全局 Session — 复用 TCP 连接池，避免每次请求重建连接
+_session: Optional[requests.Session] = None
 
-def _create_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    return s
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update(HEADERS)
+        adapter = HTTPAdapter(
+            pool_connections=20, pool_maxsize=20,
+            max_retries=Retry(total=0),  # 手动控制重试
+        )
+        _session.mount("https://", adapter)
+        _session.mount("http://", adapter)
+    return _session
 
 
 def _fetch_page(url: str, retries: int = 3) -> Optional[str]:
-    s = _create_session()
+    s = _get_session()
     for i in range(retries):
         try:
-            r = s.get(url, timeout=15)
+            r = s.get(url, timeout=10)
             r.encoding = "gbk"
             return r.text
         except Exception:
             if i < retries - 1:
-                time.sleep(1)
+                time.sleep(0.5 * (2 ** i))  # 指数退避: 0.5s, 1s, 2s
     return None
 
 
@@ -127,10 +140,10 @@ def scrape_all_pages(
 
     progress(f"[爬取] 完成: {len(all_products)} 个产品 ({pages_ok}/{total_pages} 页)")
 
-    # 写缓存
+    # 写缓存（紧凑格式减少序列化和磁盘开销）
     if cache_path:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(all_products, ensure_ascii=False, indent=2), encoding="utf-8")
+        cache_path.write_text(json.dumps(all_products, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         progress(f"[缓存] 已保存到 {cache_path.name}")
 
     return ScrapeResult(

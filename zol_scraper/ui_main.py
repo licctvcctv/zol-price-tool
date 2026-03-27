@@ -24,7 +24,29 @@ from .ui_widgets import (
 )
 
 _MATCHED_BG = QColor("#e8f5e9")
+_XCX_MATCHED_BG = QColor("#e0f7fa")
 _UNMATCHED_BG = QColor("#ffffff")
+
+
+def _row_to_vals(r_idx: int, row: dict) -> list[str]:
+    price = row.get("ZOL报价", "")
+    price_str = f"¥{price}" if price else "-"
+    return [
+        str(r_idx + 1),
+        str(row.get("品牌", "")),
+        str(row.get("机型", "")),
+        str(row.get("内存", "")),
+        price_str,
+        row.get("匹配状态", ""),
+        row.get("小程序匹配", ""),
+        row.get("ZOL链接", "") or "",
+    ]
+
+
+def _row_bg(row: dict) -> QColor:
+    if row.get("匹配状态") == "已匹配":
+        return _MATCHED_BG
+    return _UNMATCHED_BG
 
 
 class MainWindow(QMainWindow):
@@ -112,11 +134,34 @@ class MainWindow(QMainWindow):
             threads_pages=self.spin_threads_pages.value(),
             threads_images=self.spin_threads_images.value(),
             download_imgs=self.chk_download.isChecked(),
+            scrape_xcx=self.chk_xcx.isChecked(),
         )
         self._worker.progress.connect(self._add_log)
+        self._worker.rows_batch.connect(self._on_rows_batch)
         self._worker.finished.connect(self._on_scrape_done)
         self._worker.error.connect(self._on_scrape_error)
+        self.table.setRowCount(0)
+        self._all_rows = []
         self._worker.start()
+
+    def _on_rows_batch(self, batch):
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        start = self.table.rowCount()
+        self.table.setRowCount(start + len(batch))
+        for idx, row in enumerate(batch):
+            self._all_rows.append(row)
+            r = start + idx
+            bg = _row_bg(row)
+            vals = _row_to_vals(r, row)
+            for c, val in enumerate(vals):
+                cell = QTableWidgetItem(val)
+                cell.setBackground(bg)
+                if c == 0:
+                    cell.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(r, c, cell)
+        self.table.setSortingEnabled(True)
+        self.table.setUpdatesEnabled(True)
 
     def _on_scrape_done(self, result):
         self.progress.setVisible(False)
@@ -130,14 +175,15 @@ class MainWindow(QMainWindow):
 
         # 更新统计
         self.lbl_zol_count.setText(f"ZOL产品: {len(sr.products)}")
-        self.lbl_matched.setText(f"匹配: {mr.matched_count}/{mr.total_excel}")
+        self.lbl_matched.setText(f"ZOL匹配: {mr.matched_count}/{mr.total_excel}")
         self.lbl_rate.setText(f"匹配率: {pct:.1f}%")
+        self.lbl_xcx.setText(f"小程序匹配: {result.xcx_matched}")
         self.lbl_images.setText(f"图片: {result.images_downloaded}")
 
-        self._add_log(f"[+] 完成! 匹配 {mr.matched_count}/{mr.total_excel} ({pct:.1f}%)")
+        self._add_log(f"[+] 完成! ZOL匹配 {mr.matched_count}/{mr.total_excel} ({pct:.1f}%), 小程序匹配 {result.xcx_matched}")
         self._add_log(f"[+] 结果: {result.output.excel_path}")
         self.statusBar().showMessage(
-            f"爬取完成: ZOL {len(sr.products)} 产品, 匹配 {mr.matched_count}/{mr.total_excel}"
+            f"完成: ZOL {len(sr.products)} 产品, ZOL匹配 {mr.matched_count}/{mr.total_excel}, 小程序 {result.xcx_matched}"
         )
 
         self._on_search()
@@ -170,30 +216,20 @@ class MainWindow(QMainWindow):
 
     def _refresh_table(self):
         rows = self._filtered
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            is_matched = row.get("匹配状态") == "已匹配"
-            bg = _MATCHED_BG if is_matched else _UNMATCHED_BG
-
-            price = row.get("ZOL报价", "")
-            price_str = f"¥{price}" if price else "-"
-            link = row.get("ZOL链接", "") or ""
-
-            vals = [
-                str(r + 1),
-                str(row.get("品牌", "")),
-                str(row.get("机型", "")),
-                str(row.get("内存", "")),
-                price_str,
-                row.get("匹配状态", ""),
-                link,
-            ]
+            bg = _row_bg(row)
+            vals = _row_to_vals(r, row)
             for c, val in enumerate(vals):
                 cell = QTableWidgetItem(val)
                 cell.setBackground(bg)
                 if c == 0:
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(r, c, cell)
+        self.table.setSortingEnabled(True)
+        self.table.setUpdatesEnabled(True)
 
     def _on_cell_dblclick(self, row, col):
         if row < len(self._filtered):
@@ -203,10 +239,15 @@ class MainWindow(QMainWindow):
 
     # ── 缓存/目录 ────────────────────────────────────────
     def _on_clear_cache(self):
-        cache = self._output_dir() / "zol_products_cache.json"
-        if cache.exists():
-            cache.unlink()
-            self._add_log("[+] 缓存已清除")
+        out = self._output_dir()
+        cleared = False
+        for name in ["zol_products_cache.json", "xcx_prices_cache.json"]:
+            cache = out / name
+            if cache.exists():
+                cache.unlink()
+                cleared = True
+                self._add_log(f"[+] 已清除: {name}")
+        if cleared:
             self.statusBar().showMessage("缓存已清除，下次将重新爬取")
         else:
             self._add_log("[*] 没有缓存文件")
