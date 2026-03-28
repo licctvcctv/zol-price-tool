@@ -50,6 +50,8 @@ jobs:
             --hidden-import "zol_scraper.exporter" \
             --hidden-import "zol_scraper.xcx_scraper" \
             --hidden-import "zol_scraper.types" \
+            --hidden-import "zol_scraper.admin_matcher" \
+            --hidden-import "xlrd" \
             zol_gui.py
         shell: bash
 
