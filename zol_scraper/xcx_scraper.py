@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -16,8 +15,10 @@ import requests
 XCX_HASH = "eJ9NdVl"
 XCX_BASE_URL = "https://smbjd.smhsw.com/index/make/indexV2"
 XCX_BATCH_SIZE = 10
+XCX_SCAN_START_ID = 1
+XCX_SCAN_END_ID = 420
+XCX_SCAN_EMPTY_BATCH_LIMIT = 3
 DEFAULT_CATEGORIES_PATH = Path(__file__).resolve().parent.parent / "data" / "all_categories.json"
-FALLBACK_CATEGORIES_PATH = Path("/Users/a136/vs/WMPFDebugger-mac/all_categories.json")
 
 # ── 类型映射 ──────────────────────────────────────────────
 TYPE_MAP = {
@@ -58,11 +59,11 @@ def _norm_mem(s: str) -> str:
 
 # ── 分类加载 ──────────────────────────────────────────────
 def load_categories(data_dir: Optional[Path] = None) -> List[Dict]:
-    """加载小程序分类列表"""
+    """兼容旧版本的分类文件读取。主流程已改为实时扫描。"""
     paths = []
     if data_dir:
         paths.append(Path(data_dir) / "all_categories.json")
-    paths.extend([DEFAULT_CATEGORIES_PATH, FALLBACK_CATEGORIES_PATH])
+    paths.append(DEFAULT_CATEGORIES_PATH)
 
     for p in paths:
         if p.exists():
@@ -124,56 +125,66 @@ def _parse_products_from_html(html: str) -> List[Dict]:
 
 # ── 爬取小程序报价 ────────────────────────────────────────
 def scrape_xcx_prices(
-    categories: List[Dict],
+    categories: Optional[List[Dict]] = None,
     threads: int = 10,
     progress: Callable = print,
     cache_path: Optional[Path] = None,
+    cat_id_range: Optional[range] = None,
 ) -> List[Dict]:
-    """爬取全部分类的小程序回收报价"""
+    """实时爬取小程序回收报价。"""
 
-    if cache_path and cache_path.exists():
-        try:
-            data = json.loads(cache_path.read_text(encoding="utf-8"))
-            progress(f"  使用缓存: {len(data)} 个产品")
-            return data
-        except Exception:
-            pass
-
-    if not categories:
-        progress("  [!] 没有分类数据，跳过小程序爬取")
-        return []
+    if cache_path:
+        progress("  [*] 小程序报价已改为实时抓取，不再使用缓存")
 
     today = date.today().strftime("%Y-%m-%d")
     all_products: List[Dict] = []
-    total = len(categories)
+    dynamic_scan = not categories
+    if categories:
+        targets = list(categories)
+    else:
+        targets = [{"offer_cat_id": cat_id} for cat_id in (cat_id_range or range(XCX_SCAN_START_ID, XCX_SCAN_END_ID + 1))]
+    total = len(targets)
+    batch_size = XCX_BATCH_SIZE if categories else max(XCX_BATCH_SIZE * 2, threads)
 
-    def fetch_cat(cat: Dict) -> List[Dict]:
-        url = f"{XCX_BASE_URL}/catId/{cat['offer_cat_id']}/hash/{XCX_HASH}/store_id/0//history_date/{today}/points/0"
+    def fetch_cat(cat: Dict) -> tuple[int, List[Dict]]:
+        cat_id = int(cat["offer_cat_id"])
+        url = f"{XCX_BASE_URL}/catId/{cat_id}/hash/{XCX_HASH}/store_id/0//history_date/{today}/points/0"
         try:
             resp = SESSION.get(url, timeout=30)
+            if resp.status_code != 200:
+                return cat_id, []
             resp.encoding = "utf-8"
             products = _parse_products_from_html(resp.text)
             for p in products:
-                p["category"] = cat.get("cat_name", "")
-                p["top_category"] = cat.get("top_category", "")
-                p["offer_cat_id"] = cat.get("offer_cat_id", "")
-            return products
+                if cat.get("cat_name"):
+                    p["category"] = cat["cat_name"]
+                if cat.get("top_category"):
+                    p["top_category"] = cat["top_category"]
+                p["offer_cat_id"] = cat_id
+            return cat_id, products
         except Exception:
-            return []
+            return cat_id, []
 
     done = 0
-    with ThreadPoolExecutor(max_workers=threads) as pool:
-        futures = {pool.submit(fetch_cat, cat): cat for cat in categories}
-        for future in as_completed(futures):
-            prods = future.result()
-            all_products.extend(prods)
-            done += 1
-            if done % 5 == 0 or done == total:
-                progress(f"  小程序分类: {done}/{total} (累计 {len(all_products)} 产品)")
-
-    if cache_path:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(all_products, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    empty_batches = 0
+    for start in range(0, total, batch_size):
+        batch = targets[start:start + batch_size]
+        batch_hits = 0
+        with ThreadPoolExecutor(max_workers=threads) as pool:
+            futures = {pool.submit(fetch_cat, cat): cat for cat in batch}
+            for future in as_completed(futures):
+                _, prods = future.result()
+                if prods:
+                    batch_hits += 1
+                    all_products.extend(prods)
+        done += len(batch)
+        if dynamic_scan:
+            progress(f"  小程序扫描: {done}/{total} (命中 {batch_hits}, 累计 {len(all_products)} 产品)")
+            empty_batches = empty_batches + 1 if batch_hits == 0 else 0
+            if cat_id_range is None and empty_batches >= XCX_SCAN_EMPTY_BATCH_LIMIT:
+                break
+        elif done % 5 == 0 or done == total:
+            progress(f"  小程序分类: {done}/{total} (累计 {len(all_products)} 产品)")
 
     return all_products
 
@@ -196,15 +207,18 @@ XCX_BRAND_ALIASES: dict[str, list[str]] = {
 
 
 # ── 构建价格索引 ──────────────────────────────────────────
-def build_price_index(price_data: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
-    """返回 (带top_cat的索引, 不带top_cat的索引) 用于回退搜索"""
+def build_price_index(price_data: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict], Dict[str, Dict]]:
+    """返回 (带top_cat索引, 品牌回退索引, 型号回退索引)。"""
     index: Dict[str, Dict] = {}
     brand_model_index: Dict[str, Dict] = {}  # 不含 top_cat 的回退索引
+    model_index: Dict[str, Dict] = {}  # 不含品牌/分类的回退索引
     for p in price_data:
         brand = _normalize(p.get("category", ""))
         model = _normalize(p.get("model", ""))
         mem = _norm_mem(p.get("sub_category", ""))
         top_cat = p.get("top_category", "")
+        if not model:
+            continue
         prices: Dict[str, Any] = {}
         for k, v in p.items():
             if k.endswith("_store"):
@@ -229,7 +243,15 @@ def build_price_index(price_data: List[Dict]) -> tuple[Dict[str, Dict], Dict[str
             if bm_key2 not in brand_model_index:
                 brand_model_index[bm_key2] = prices
 
-    return index, brand_model_index
+        model_key = f"{model}|{mem}"
+        if model_key not in model_index:
+            model_index[model_key] = prices
+        if not mem:
+            model_key2 = f"{model}|"
+            if model_key2 not in model_index:
+                model_index[model_key2] = prices
+
+    return index, brand_model_index, model_index
 
 
 def _get_brand_variants(brand: str, top_cat: str) -> list[str]:
@@ -250,6 +272,7 @@ def _get_brand_variants(brand: str, top_cat: str) -> list[str]:
 def _find_prices(
     price_index: Dict[str, Dict],
     brand_model_index: Dict[str, Dict],
+    model_index: Dict[str, Dict],
     client_type: str, client_brand: str, client_model: str, mem: str,
 ) -> Optional[Dict]:
     top_cat = TYPE_MAP.get(client_type, client_type)
@@ -273,6 +296,7 @@ def _find_prices(
     cleaned = re.sub(r"(\d+)代", r"\1", model)
     if cleaned != model:
         model_variants.append(cleaned)
+    model_variants = list(dict.fromkeys(model_variants))
 
     # 1. 精确匹配（带 top_cat）
     for mv in model_variants:
@@ -314,6 +338,23 @@ def _find_prices(
                         if not mem_norm or imem == mem_norm or not imem:
                             return prices
 
+    # 5. 回退：只按型号+内存精确匹配
+    for mv in model_variants:
+        for key in [f"{mv}|{mem_norm}", f"{mv}|"]:
+            if key in model_index:
+                return model_index[key]
+
+    # 6. 回退：只按型号+内存模糊匹配
+    for mv in model_variants:
+        for key, prices in model_index.items():
+            parts = key.split("|")
+            if len(parts) < 2:
+                continue
+            im, imem = parts[0], parts[1]
+            if (im in mv or mv in im) and len(im) > 1 and len(mv) > 1:
+                if not mem_norm or imem == mem_norm or not imem:
+                    return prices
+
     return None
 
 
@@ -325,8 +366,11 @@ def merge_xcx_prices(
     on_row_update: Optional[Callable] = None,
 ) -> tuple[List[Dict], int]:
     """将小程序回收价合并到匹配结果行中，返回 (更新后的rows, 匹配数)"""
-    price_index, brand_model_index = build_price_index(price_data)
-    progress(f"  小程序价格索引: {len(price_index)} 条 (回退索引: {len(brand_model_index)} 条)")
+    price_index, brand_model_index, model_index = build_price_index(price_data)
+    progress(
+        f"  小程序价格索引: {len(price_index)} 条 "
+        f"(品牌回退: {len(brand_model_index)} 条, 型号回退: {len(model_index)} 条)"
+    )
 
     matched = 0
     total = len(rows)
@@ -353,7 +397,7 @@ def merge_xcx_prices(
 
         prices = None
         for mem_v in mem_variants:
-            prices = _find_prices(price_index, brand_model_index, client_type, client_brand, client_model, mem_v)
+            prices = _find_prices(price_index, brand_model_index, model_index, client_type, client_brand, client_model, mem_v)
             if prices:
                 break
         if prices:

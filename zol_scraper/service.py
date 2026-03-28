@@ -10,7 +10,7 @@ import pandas as pd
 from .admin_scraper import _create_session, admin_login, scrape_admin_prices
 from .admin_matcher import match_admin_prices
 from .exporter import export_excel
-from .xcx_scraper import load_categories, scrape_xcx_prices, merge_xcx_prices
+from .xcx_scraper import scrape_xcx_prices, merge_xcx_prices
 from .types import OutputPaths
 
 
@@ -68,26 +68,19 @@ def run_pipeline(
     xcx_matched = 0
     if scrape_xcx:
         progress("[4/5] 小程序报价匹配...")
-        categories = load_categories(data_dir=out_dir)
-        if categories:
-            xcx_cache = out_dir / "xcx_prices_cache.json"
-            xcx_data = scrape_xcx_prices(
-                categories, threads=threads,
-                progress=progress, cache_path=xcx_cache,
-            )
+        xcx_data = scrape_xcx_prices(
+            threads=threads,
+            progress=progress,
+        )
+        if xcx_data:
             _, xcx_matched = merge_xcx_prices(
                 rows, xcx_data, progress=progress,
             )
             progress(f"  小程序匹配: {xcx_matched}/{len(rows)}")
         else:
-            progress("  未找到小程序分类数据，跳过")
+            progress("  [!] 小程序实时抓取未返回有效数据")
     else:
         progress("[4/5] 跳过小程序匹配")
-
-    # 推送每一行给 UI
-    if on_row:
-        for row in rows:
-            on_row(row)
 
     # 5. 导出
     progress("[5/5] 导出结果...")

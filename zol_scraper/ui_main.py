@@ -2,20 +2,20 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QTableWidgetItem, QFileDialog, QMessageBox,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor
 
 from .constants import (
     APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT,
     load_config, save_config,
 )
+from .platform_utils import open_directory
 from .worker import ScrapeWorker
 from .ui_widgets import (
     build_toolbar, build_settings_bar, build_stats_bar,
@@ -135,31 +135,11 @@ class MainWindow(QMainWindow):
             scrape_xcx=self.chk_xcx.isChecked(),
         )
         self._worker.progress.connect(self._add_log)
-        self._worker.rows_batch.connect(self._on_rows_batch)
         self._worker.finished.connect(self._on_scrape_done)
         self._worker.error.connect(self._on_scrape_error)
         self.table.setRowCount(0)
         self._all_rows = []
         self._worker.start()
-
-    def _on_rows_batch(self, batch):
-        self.table.setUpdatesEnabled(False)
-        self.table.setSortingEnabled(False)
-        start = self.table.rowCount()
-        self.table.setRowCount(start + len(batch))
-        for idx, row in enumerate(batch):
-            self._all_rows.append(row)
-            r = start + idx
-            bg = _row_bg(row)
-            vals = _row_to_vals(r, row)
-            for c, val in enumerate(vals):
-                cell = QTableWidgetItem(val)
-                cell.setBackground(bg)
-                if c == 0:
-                    cell.setTextAlignment(Qt.AlignCenter)
-                self.table.setItem(r, c, cell)
-        self.table.setSortingEnabled(True)
-        self.table.setUpdatesEnabled(True)
 
     def _on_scrape_done(self, result):
         self.progress.setVisible(False)
@@ -182,7 +162,7 @@ class MainWindow(QMainWindow):
             f"完成: 后台匹配 {result.admin_matched}/{result.total_excel}, 小程序 {result.xcx_matched}"
         )
 
-        self._on_search()
+        QTimer.singleShot(0, self._on_search)
 
     def _on_scrape_error(self, msg):
         self.progress.setVisible(False)
@@ -245,7 +225,7 @@ class MainWindow(QMainWindow):
     def _on_open_output(self):
         out = self._output_dir()
         out.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["open", str(out)], check=False)
+        open_directory(out)
 
     # ── 日志 ─────────────────────────────────────────────
     def _add_log(self, msg: str):
